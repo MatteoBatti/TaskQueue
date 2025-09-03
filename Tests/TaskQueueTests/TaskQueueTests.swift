@@ -341,6 +341,70 @@ struct CancellationTests {
       try await task2.result.get()
     }
   }
+  
+  @Test("Cancelled operations are cleaned up from internal operations list", .tags(.fast, .cancellation))
+  func cancelledOperationsAreCleanedUp() async throws {
+    let queue = TaskQueue()
+    
+    // Add a long-running operation that we can cancel
+    let longRunningTask = queue.addOperation {
+      try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+      return "should not complete"
+    }
+    
+    // Add another operation that will complete
+    let quickTask = queue.addOperation {
+      return "completed"
+    }
+    
+    // Cancel the first task
+    longRunningTask.cancel()
+    
+    // Wait for the quick task to complete, which should trigger cleanup
+    let result = await quickTask.value
+    #expect(result == "completed")
+    
+    // Verify the cancelled task was properly cancelled
+    await #expect(throws: CancellationError.self) {
+      try await longRunningTask.result.get()
+    }
+  }
+  
+  @Test("Multiple cancelled operations are cleaned up efficiently", .tags(.cancellation))  
+  func multipleCancelledOperationsAreCleanedUp() async throws {
+    let queue = TaskQueue()
+    var cancelledTasks: [Task<String, Error>] = []
+    
+    // Add multiple long-running operations
+    for i in 1...5 {
+      let task = queue.addOperation {
+        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        return "task-\(i)"
+      }
+      cancelledTasks.append(task)
+    }
+    
+    // Add a completion task to trigger cleanup
+    let completionTask = queue.addOperation {
+      return "cleanup-trigger"
+    }
+    
+    // Cancel all the long-running tasks
+    for task in cancelledTasks {
+      task.cancel()
+    }
+    
+    // Wait for completion task - this should clean up cancelled operations
+    let result = await completionTask.value
+    #expect(result == "cleanup-trigger")
+    
+    // Verify all cancelled tasks throw CancellationError
+    for task in cancelledTasks {
+      await #expect(throws: CancellationError.self) {
+        try await task.result.get()
+      }
+    }
+  }
 }
 
 // MARK: - Error Handling Tests

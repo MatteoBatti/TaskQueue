@@ -2,6 +2,7 @@ import Foundation
 
 internal protocol Cancellable {
   func cancel()
+  var isCancelled: Bool { get }
 }
 
 internal protocol Endable {
@@ -36,7 +37,7 @@ final public class TaskQueue: @unchecked Sendable {
   let defaultQos: TaskPriority?
   let attributes: Attributes
   
-  init(qos: TaskPriority? = nil, attributes: Attributes = []) {
+  public init(qos: TaskPriority? = nil, attributes: Attributes = []) {
     self.defaultQos = qos
     self.attributes = attributes
   }
@@ -121,6 +122,11 @@ final public class TaskQueue: @unchecked Sendable {
       lock.unlock()
     }
     operations.removeAll { $0.id == id }
+    
+    // Remove all cancelled operations.
+    operations.removeAll { operation in
+      return operation.task.isCancelled
+    }
   }
 }
 
@@ -152,7 +158,7 @@ extension TaskQueue {
 }
 
 extension TaskQueue {
-  func addBarrierOperation<Success>(
+  public func addBarrierOperation<Success>(
     qos: TaskPriority? = nil,
     @_inheritActorContext _ operation: @escaping AsyncThrowingOperation<Success>
   ) -> Task<Success, Error> {
@@ -163,7 +169,7 @@ extension TaskQueue {
     )
   }
   
-  func addBarrierOperation<Success>(
+  public func addBarrierOperation<Success>(
     qos: TaskPriority? = nil,
     @_inheritActorContext _ operation: @escaping AsyncOperation<Success>
   ) -> Task<Success, Never> {
