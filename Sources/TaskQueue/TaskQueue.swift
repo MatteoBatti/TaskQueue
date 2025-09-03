@@ -42,7 +42,7 @@ final public class TaskQueue: @unchecked Sendable {
   }
   
   private func appendAsyncThrowingOperation<Success>(
-    _ operation: @escaping AsyncThrowingOperation<Success>,
+    @_inheritActorContext _ operation: @escaping AsyncThrowingOperation<Success>,
     qos: TaskPriority?,
     isBarrier: Bool
   ) -> Task<Success, Error>{
@@ -68,7 +68,7 @@ final public class TaskQueue: @unchecked Sendable {
   }
   
   private func appendAsyncOperation<Success>(
-    _ operation: @escaping AsyncOperation<Success>,
+    @_inheritActorContext _ operation: @escaping AsyncOperation<Success>,
     qos: TaskPriority?,
     isBarrier: Bool
   ) -> Task<Success, Never>{
@@ -129,7 +129,7 @@ extension TaskQueue {
   @discardableResult
   public func addOperation<Success>(
     qos: TaskPriority? = nil,
-    _ operation: @escaping AsyncThrowingOperation<Success>
+    @_inheritActorContext _ operation: @escaping AsyncThrowingOperation<Success>
   ) -> Task<Success, Error> {
     return appendAsyncThrowingOperation(
       operation,
@@ -141,7 +141,7 @@ extension TaskQueue {
   @discardableResult
   public func addOperation<Success>(
     qos: TaskPriority? = nil,
-    _ operation: @escaping AsyncOperation<Success>
+    @_inheritActorContext _ operation: @escaping AsyncOperation<Success>
   ) -> Task<Success, Never> {
     return appendAsyncOperation(
       operation,
@@ -154,7 +154,7 @@ extension TaskQueue {
 extension TaskQueue {
   func addBarrierOperation<Success>(
     qos: TaskPriority? = nil,
-    _ operation: @escaping AsyncThrowingOperation<Success>
+    @_inheritActorContext _ operation: @escaping AsyncThrowingOperation<Success>
   ) -> Task<Success, Error> {
     return appendAsyncThrowingOperation(
       operation,
@@ -165,7 +165,7 @@ extension TaskQueue {
   
   func addBarrierOperation<Success>(
     qos: TaskPriority? = nil,
-    _ operation: @escaping AsyncOperation<Success>
+    @_inheritActorContext _ operation: @escaping AsyncOperation<Success>
   ) -> Task<Success, Never> {
     return appendAsyncOperation(
       operation,
