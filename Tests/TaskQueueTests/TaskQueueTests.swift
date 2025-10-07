@@ -272,24 +272,26 @@ struct ConcurrentTaskQueueTests {
 @Suite("Quality of Service", .tags(.qos))
 struct QualityOfServiceTests {
   
-//  @Test("Operations respect QoS levels", .tags(.fast, .qos), arguments:
-//    [
-//      (TaskPriority.low, TaskPriority.medium),
-//      (TaskPriority.medium, TaskPriority.low),
-//      (TaskPriority.low, TaskPriority.high),
-//      (TaskPriority.high, TaskPriority.medium)
-//    ]
-//  )
-//  func operationsRespectQoSLevels(qos: TaskPriority, expectedMinimum: TaskPriority) async throws {
-//    let queue = TaskQueue(qos: expectedMinimum, attributes: [.concurrent])
-//    
-//    let task = queue.addOperation(qos: qos) {
-//      return Task.currentPriority
-//    }
-//    
-//    let actualPriority = await task.value
-//    #expect(actualPriority >= expectedMinimum)
-//  }
+  @Test("Operations respect QoS levels", .tags(.fast, .qos), arguments:
+    [
+      (TaskPriority.low, TaskPriority.low),
+      (TaskPriority.low, TaskPriority.medium),
+      (TaskPriority.low, TaskPriority.high),
+      (TaskPriority.medium, TaskPriority.medium),
+      (TaskPriority.medium, TaskPriority.high),
+      (TaskPriority.high, TaskPriority.high),
+    ]
+  )
+  func operationsRespectQoSLevels(taskPriority: TaskPriority, queuePriority: TaskPriority) async throws {
+    let queue = TaskQueue(qos: queuePriority, attributes: [.concurrent])
+    
+    let task = queue.addOperation(qos: taskPriority) {
+      return Task.currentPriority
+    }
+    
+    let actualPriority = await task.value
+    #expect(actualPriority <= queuePriority)
+  }
   
   @Test("Queue respects default QoS when none specified", .tags(.fast))
   func defaultQoSBehavior() async throws {
