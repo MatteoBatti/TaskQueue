@@ -9,9 +9,11 @@ internal protocol Endable {
   func awaitToBeCompleted() async
 }
 
-internal typealias OperationTask = any (Cancellable & Endable)
+internal typealias OperationTask = any (Cancellable & Endable & Sendable)
 public typealias AsyncThrowingOperation<Success> = @isolated(any) @Sendable () async throws -> sending Success
 public typealias AsyncOperation<Success> = @isolated(any) @Sendable () async -> sending Success
+typealias DequeueOperation = @Sendable () async -> Void
+typealias TaskBuilderOperation<Success, Failure: Error> = @Sendable (_ dequeue: @escaping DequeueOperation) -> Task<Success, Failure>
 
 /// A thread-safe task queue that manages the execution order of asynchronous operations.
 ///
@@ -24,10 +26,10 @@ public typealias AsyncOperation<Success> = @isolated(any) @Sendable () async -> 
 /// ```swift
 /// // Serial queue (default)
 /// let serialQueue = TaskQueue()
-/// 
+///
 /// // Concurrent queue
 /// let concurrentQueue = TaskQueue(attributes: [.concurrent])
-/// 
+///
 /// // Queue with custom QoS
 /// let highPriorityQueue = TaskQueue(qos: .high)
 /// ```
@@ -48,7 +50,7 @@ final public class TaskQueue: @unchecked Sendable {
     }
   }
   
-  internal struct Operation: Identifiable {
+  internal struct Operation: Sendable, Identifiable {
     let id: UUID
     let task: OperationTask
     let isBarrier: Bool
@@ -77,7 +79,7 @@ final public class TaskQueue: @unchecked Sendable {
   /// // Concurrent queue with high priority
   /// let fastQueue = TaskQueue(qos: .high, attributes: [.concurrent])
   ///
-  /// // Serial queue with user-initiated priority  
+  /// // Serial queue with user-initiated priority
   /// let uiQueue = TaskQueue(qos: .userInitiated)
   /// ```
   public init(qos: TaskPriority? = nil, attributes: Attributes = []) {
@@ -90,25 +92,12 @@ final public class TaskQueue: @unchecked Sendable {
     qos: TaskPriority?,
     isBarrier: Bool
   ) -> Task<Success, Error>{
-    lock.lock()
-    defer {
-      lock.unlock()
-    }
-
-    let id = UUID()
-    let previousOperations = self.previousOperationsToWaitFor(isCurrentOperationABarrier: isBarrier)
-    let task = Task(priority: qos ?? defaultQos) { [previousOperations] in
-      defer {
-        self.removeCompletedOperation(id)
+    return self.appendOperation(isBarrier: isBarrier) { dequeue  in
+      return Task(priority: qos ?? self.defaultQos) { [dequeue] in
+        await dequeue()
+        return try await operation()
       }
-      for operation in previousOperations {
-        await operation.task.awaitToBeCompleted()
-      }
-      return try await operation()
     }
-    
-    operations.append(Operation(id: id, task: task, isBarrier: isBarrier))
-    return task
   }
   
   private func appendAsyncOperation<Success>(
@@ -116,26 +105,38 @@ final public class TaskQueue: @unchecked Sendable {
     qos: TaskPriority?,
     isBarrier: Bool
   ) -> Task<Success, Never>{
-    lock.lock()
-    defer {
-      lock.unlock()
+    return self.appendOperation(isBarrier: isBarrier) { dequeue  in
+      return Task(priority: qos ?? self.defaultQos) { [dequeue] in
+        await dequeue()
+        return await operation()
+      }
     }
-
-    let id = UUID()
+  }
+  
+  private func appendOperation<Success, Failure>(
+    isBarrier: Bool,
+    taskBuilder: @escaping TaskBuilderOperation<Success, Failure>
+  ) -> Task<Success, Failure> where Failure: Error {
+    lock.lock()
+    defer { lock.unlock() }
+    
+    let operationId = UUID()
     let previousOperations = self.previousOperationsToWaitFor(isCurrentOperationABarrier: isBarrier)
-    let task = Task(priority: qos ?? defaultQos) { [previousOperations] in
+    
+    let task = taskBuilder { [previousOperations, operationId] in
       defer {
-        self.removeCompletedOperation(id)
+        self.removeCompletedOperation(operationId)
       }
       for operation in previousOperations {
         await operation.task.awaitToBeCompleted()
       }
-      return await operation()
     }
     
-    operations.append(Operation(id: id, task: task, isBarrier: isBarrier))
+    let wrappedOperation = Operation(id: operationId, task: task, isBarrier: isBarrier)
+    operations.append(wrappedOperation)
     return task
   }
+
   
   private func previousOperationsToWaitFor(isCurrentOperationABarrier isBarrier: Bool) -> [Operation] {
     let previousOperations: [Operation]
@@ -221,7 +222,7 @@ extension TaskQueue {
   /// Adds an operation that cannot throw errors to the queue.
   ///
   /// Operations are executed according to the queue's configuration:
-  /// - In serial queues: operations execute one after another in FIFO order  
+  /// - In serial queues: operations execute one after another in FIFO order
   /// - In concurrent queues: operations can execute in parallel unless blocked by barriers
   ///
   /// - Parameters:
@@ -306,7 +307,7 @@ extension TaskQueue {
   ///
   /// Barrier operations provide synchronization points in the queue:
   /// - All operations submitted before the barrier must complete before the barrier executes
-  /// - All operations submitted after the barrier wait for the barrier to complete before executing  
+  /// - All operations submitted after the barrier wait for the barrier to complete before executing
   /// - In concurrent queues, this effectively creates a serialization point
   ///
   /// - Parameters:
@@ -362,7 +363,7 @@ extension TaskQueue {
   ///
   /// // Add several operations
   /// queue.addOperation { await longRunningTask1() }
-  /// queue.addOperation { await longRunningTask2() } 
+  /// queue.addOperation { await longRunningTask2() }
   /// queue.addOperation { await longRunningTask3() }
   ///
   /// // Cancel everything
